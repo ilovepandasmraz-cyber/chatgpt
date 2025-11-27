@@ -5,12 +5,7 @@ const {
   REST,
   Routes,
   SlashCommandBuilder,
-  ActionRowBuilder,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle,
   EmbedBuilder,
-  StringSelectMenuBuilder,
 } = require('discord.js');
 
 // --------------------------------------------------
@@ -68,7 +63,39 @@ const commands = [
     ),
   new SlashCommandBuilder()
     .setName('department-feedback')
-    .setDescription('Submit department feedback that is posted to the feedback channel.'),
+    .setDescription('Submit department feedback that is posted to the feedback channel.')
+    .addStringOption((option) =>
+      option
+        .setName('department')
+        .setDescription('Department the feedback relates to')
+        .setRequired(true)
+        .addChoices(
+          ...Object.entries(DEPARTMENTS).map(([key, value]) => ({
+            name: value.label,
+            value: key,
+          }))
+        )
+    )
+    .addUserOption((option) =>
+      option
+        .setName('member')
+        .setDescription('Member being reviewed')
+        .setRequired(true)
+    )
+    .addIntegerOption((option) =>
+      option
+        .setName('rating')
+        .setDescription('Rating from 1-5')
+        .setRequired(true)
+        .setMinValue(1)
+        .setMaxValue(5)
+    )
+    .addStringOption((option) =>
+      option
+        .setName('feedback')
+        .setDescription('Feedback details')
+        .setRequired(true)
+    ),
 ].map((command) => command.toJSON());
 
 async function registerCommands() {
@@ -89,54 +116,11 @@ function hasStaffRole(member) {
   return member.roles.cache.has(DEPARTMENT_STAFF_ROLE_ID);
 }
 
-function buildDepartmentSelectRow() {
-  const menu = new StringSelectMenuBuilder()
-    .setCustomId('department-select')
-    .setPlaceholder('Choose a department')
-    .addOptions(
-      Object.entries(DEPARTMENTS).map(([key, value]) => ({
-        label: value.label,
-        value: key,
-      }))
-    );
-  return new ActionRowBuilder().addComponents(menu);
-}
-
-function buildFeedbackModal(departmentKey) {
-  const dept = DEPARTMENTS[departmentKey];
-  return new ModalBuilder()
-    .setCustomId(`feedback-modal:${departmentKey}`)
-    .setTitle(`${dept.label} Feedback`)
-    .addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('member')
-          .setLabel('Member (tag, callsign, or mention)')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('rating')
-          .setLabel('Rating (1-5)')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('feedback')
-          .setLabel('Feedback details')
-          .setStyle(TextInputStyle.Paragraph)
-          .setRequired(true)
-      )
-    );
-}
-
-function buildFeedbackEmbed(departmentKey, memberText, ratingText, feedbackText, authorTag) {
+function buildFeedbackEmbed(departmentKey, memberLabel, ratingText, feedbackText, authorMention) {
   const dept = DEPARTMENTS[departmentKey];
   const description =
-    `**Member** \u2003\u2003\u2003\u2003 **Rating**\n${memberText} \u2003\u2003 ${ratingText}` +
-    `\n\n**Feedback**\n${feedbackText}\n\nFeedback by: ${authorTag}`;
+    `**Member** \u2003\u2003\u2003\u2003 **Rating**\n${memberLabel} \u2003\u2003 ${ratingText}` +
+    `\n\n**Feedback**\n${feedbackText}\n\nFeedback by: ${authorMention}`;
 
   return new EmbedBuilder()
     .setTitle(`${dept.label} Feedback`)
@@ -167,23 +151,6 @@ client.on('interactionCreate', async (interaction) => {
       } else if (interaction.commandName === 'department-feedback') {
         await handleDepartmentFeedback(interaction);
       }
-      return;
-    }
-
-    if (interaction.isStringSelectMenu() && interaction.customId === 'department-select') {
-      const departmentKey = interaction.values[0];
-      if (!DEPARTMENTS[departmentKey]) {
-        await interaction.reply({ content: 'Unknown department selected.', ephemeral: true });
-        return;
-      }
-      const modal = buildFeedbackModal(departmentKey);
-      await interaction.showModal(modal);
-      return;
-    }
-
-    if (interaction.isModalSubmit() && interaction.customId.startsWith('feedback-modal:')) {
-      const departmentKey = interaction.customId.split(':')[1];
-      await handleFeedbackModal(interaction, departmentKey);
     }
   } catch (err) {
     console.error('Error handling interaction:', err);
@@ -269,37 +236,30 @@ async function handleDepartmentBan(interaction) {
 async function handleDepartmentFeedback(interaction) {
   if (!(await ensureMainGuild(interaction))) return;
 
-  await interaction.reply({
-    ephemeral: true,
-    embeds: [
-      new EmbedBuilder()
-        .setTitle('Department Feedback')
-        .setDescription('Select the department you want to leave feedback for.')
-        .setColor('#2b2d31'),
-    ],
-    components: [buildDepartmentSelectRow()],
-  });
-}
+  const departmentKey = interaction.options.getString('department', true);
+  const memberOption = interaction.options.getUser('member', true);
+  const ratingValue = interaction.options.getInteger('rating', true);
+  const feedbackText = interaction.options.getString('feedback', true);
 
-async function handleFeedbackModal(interaction, departmentKey) {
-  if (interaction.guildId !== MAIN_GUILD_ID) {
+  if (!DEPARTMENTS[departmentKey]) {
     await interaction.reply({
-      content: 'Feedback can only be submitted from the main department server.',
+      content: 'Invalid department selected. Please try again.',
       ephemeral: true,
     });
     return;
   }
 
-  const memberText = interaction.fields.getTextInputValue('member');
-  const ratingText = interaction.fields.getTextInputValue('rating');
-  const feedbackText = interaction.fields.getTextInputValue('feedback');
+  const ratingText = `${ratingValue}`;
+  const memberMention = `<@${memberOption.id}>`;
+  const memberLabel = memberOption.tag || memberOption.username;
+  const authorMention = `<@${interaction.user.id}>`;
 
   const feedbackEmbed = buildFeedbackEmbed(
     departmentKey,
-    memberText,
+    memberLabel,
     ratingText,
     feedbackText,
-    interaction.user.tag
+    authorMention
   );
 
   try {
@@ -309,7 +269,7 @@ async function handleFeedbackModal(interaction, departmentKey) {
       throw new Error('Feedback channel not found or not text-based.');
     }
 
-    await feedbackChannel.send({ embeds: [feedbackEmbed] });
+    await feedbackChannel.send({ content: memberMention, embeds: [feedbackEmbed] });
     await interaction.reply({ content: 'Feedback submitted successfully.', ephemeral: true });
   } catch (err) {
     console.error('Failed to send feedback:', err);
