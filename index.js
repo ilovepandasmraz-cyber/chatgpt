@@ -15,6 +15,7 @@ const MAIN_GUILD_ID = '1419672871118311456';
 const DEPARTMENT_BAN_ROLE_ID = '1443421035994288180';
 const DEPARTMENT_STAFF_ROLE_ID = '1419830480806613082';
 const FEEDBACK_CHANNEL_ID = '1443424569560924281';
+const COMMAND_LOG_CHANNEL_ID = FEEDBACK_CHANNEL_ID; // Reuse feedback channel for logging; adjust if a dedicated log channel is available
 
 const DEPARTMENTS = {
   tcs: {
@@ -46,6 +47,11 @@ const DEPARTMENTS = {
     label: 'Austin PD',
     color: '#110cab',
     roleId: '1421828665284493312',
+  },
+  afd: {
+    label: 'Austin Fire',
+    color: '#e25822',
+    roleId: '1443431807394775151',
   },
 };
 
@@ -164,6 +170,31 @@ async function ensureMainGuild(interaction) {
   return true;
 }
 
+async function sendCommandLog(commandName, actor) {
+  try {
+    const mainGuild = await client.guilds.fetch(MAIN_GUILD_ID);
+    const logChannel = await mainGuild.channels.fetch(COMMAND_LOG_CHANNEL_ID);
+    if (!logChannel || !logChannel.isTextBased()) {
+      throw new Error('Log channel not found or not text-based.');
+    }
+
+    const timestamp = Math.floor(Date.now() / 1000);
+    const logEmbed = new EmbedBuilder()
+      .setTitle('Texas State Bot Command Log')
+      .addFields(
+        { name: 'Command Executed', value: commandName, inline: false },
+        { name: 'Executed By', value: `<@${actor.id}> (${actor.tag})`, inline: false },
+        { name: 'Executed At', value: `<t:${timestamp}:F>`, inline: false }
+      )
+      .setColor('#2b2d31')
+      .setTimestamp();
+
+    await logChannel.send({ embeds: [logEmbed] });
+  } catch (err) {
+    console.error('Failed to send command log entry:', err);
+  }
+}
+
 // --------------------------------------------------
 // Interaction handling
 // --------------------------------------------------
@@ -255,6 +286,7 @@ async function handleDepartmentBan(interaction) {
   }
 
   await interaction.editReply({ content: responseLines.join('\n') });
+  await sendCommandLog('/department-ban', interaction.user);
 }
 
 async function handleDepartmentFeedback(interaction) {
@@ -313,6 +345,7 @@ async function handleDepartmentFeedback(interaction) {
 
     await feedbackChannel.send({ content: memberMention, embeds: [feedbackEmbed] });
     await interaction.reply({ content: 'Feedback submitted successfully.', ephemeral: true });
+    await sendCommandLog('/department-feedback', interaction.user);
   } catch (err) {
     console.error('Failed to send feedback:', err);
     if (interaction.isRepliable()) {
