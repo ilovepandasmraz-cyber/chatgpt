@@ -17,12 +17,36 @@ const DEPARTMENT_STAFF_ROLE_ID = '1419830480806613082';
 const FEEDBACK_CHANNEL_ID = '1443424569560924281';
 
 const DEPARTMENTS = {
-  tcs: { label: 'Travis County Sheriff', color: '#d7b963' },
-  dps: { label: 'Texas DPS', color: '#333232' },
-  dhs: { label: 'Homeland Security', color: '#FFFFFF' },
-  ntecc: { label: 'NTECC', color: '#CC0000' },
-  txdot: { label: 'TxDOT', color: '#4fd138' },
-  apd: { label: 'Austin PD', color: '#110cab' },
+  tcs: {
+    label: 'Travis County Sheriff',
+    color: '#d7b963',
+    roleId: '1419831312935682241',
+  },
+  dps: {
+    label: 'Texas DPS',
+    color: '#333232',
+    roleId: '1419831440459305112',
+  },
+  dhs: {
+    label: 'Homeland Security',
+    color: '#FFFFFF',
+    roleId: '1421830437604560966',
+  },
+  ntecc: {
+    label: 'NTECC',
+    color: '#CC0000',
+    roleId: '1419831782483951786',
+  },
+  txdot: {
+    label: 'TxDOT',
+    color: '#4fd138',
+    roleId: null, // role not provided; feedback submission is blocked until configured
+  },
+  apd: {
+    label: 'Austin PD',
+    color: '#110cab',
+    roleId: '1421828665284493312',
+  },
 };
 
 const { DISCORD_TOKEN, CLIENT_ID } = process.env;
@@ -249,21 +273,39 @@ async function handleDepartmentFeedback(interaction) {
     return;
   }
 
+  const departmentRoleId = DEPARTMENTS[departmentKey].roleId;
+  if (!departmentRoleId) {
+    await interaction.reply({
+      content: 'Role requirement for this department is not configured. Please contact an administrator.',
+      ephemeral: true,
+    });
+    return;
+  }
+
   const ratingText = `${ratingValue}`;
   const memberMention = `<@${memberOption.id}>`;
   const memberLabel = memberOption.tag || memberOption.username;
   const authorMention = `<@${interaction.user.id}>`;
 
-  const feedbackEmbed = buildFeedbackEmbed(
-    departmentKey,
-    memberLabel,
-    ratingText,
-    feedbackText,
-    authorMention
-  );
-
   try {
     const mainGuild = await client.guilds.fetch(MAIN_GUILD_ID);
+    const memberInGuild = await mainGuild.members.fetch(memberOption.id);
+    if (!memberInGuild.roles.cache.has(departmentRoleId)) {
+      await interaction.reply({
+        content: 'The reviewed member does not have the required department role.',
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const feedbackEmbed = buildFeedbackEmbed(
+      departmentKey,
+      memberLabel,
+      ratingText,
+      feedbackText,
+      authorMention
+    );
+
     const feedbackChannel = await mainGuild.channels.fetch(FEEDBACK_CHANNEL_ID);
     if (!feedbackChannel || !feedbackChannel.isTextBased()) {
       throw new Error('Feedback channel not found or not text-based.');
